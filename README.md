@@ -33,8 +33,10 @@ Copy-Item .env.example .env
 .\.venv\Scripts\python.exe manage.py migrate
 .\.venv\Scripts\python.exe manage.py createsuperuser
 .\.venv\Scripts\python.exe manage.py check
-.\.venv\Scripts\python.exe manage.py runserver 127.0.0.1:8000
+.\.venv\Scripts\python.exe manage.py runserver 0.0.0.0:8001
 ```
+
+Сервер слушает все сетевые интерфейсы на порту **8001**. На самом сервере открывайте `http://127.0.0.1:8001`, с другого компьютера — `http://<IP-или-DNS-сервера>:8001`. Добавьте этот IP или DNS в `DJANGO_ALLOWED_HOSTS` файла `.env` через запятую, без схемы и порта. `0.0.0.0` обозначает адрес привязки, а не адрес для браузера. Для доступа из локальной сети разрешите входящий TCP 8001 в Windows Firewall для нужной сети.
 
 В отдельном PowerShell из того же каталога:
 
@@ -43,6 +45,17 @@ Copy-Item .env.example .env
 ```
 
 `etl_worker --once` обрабатывает максимум один ожидающий запуск и завершает работу; `--poll 2` меняет интервал опроса. Worker должен работать постоянно как управляемый процесс/служба под отдельной Windows service account. Настройте перезапуск при аварии и запрет второго экземпляра. Закрытие консоли остановит обычный процесс.
+
+## После запуска сервера
+
+1. Оставьте окно веб-сервера открытым и откройте в браузере адрес вашего сервера с портом `8001`.
+2. Войдите под пользователем, созданным командой `manage.py createsuperuser`. Если ещё не создали его, выполните эту команду в другом PowerShell из корня проекта.
+3. В отдельном PowerShell запустите `.\.venv\Scripts\python.exe manage.py etl_worker`. Без worker задания остаются PENDING.
+4. Создайте два подключения: Source к базе 1С и Target к отдельной аналитической базе. Проверьте оба кнопкой «Проверить подключение».
+5. Создайте Full Load задание, укажите таблицу или SELECT, существующую целевую схему и имя таблицы назначения.
+6. Нажмите «Запустить сейчас», наблюдайте PENDING → RUNNING → SUCCESS. При FAILED откройте сообщение ошибки и этап выполнения; проверьте конфигурацию перед повтором.
+7. После SUCCESS проверьте количество и содержимое строк в целевой базе SQL Server и запись в разделе «История».
+8. Для автоматизации включите расписание и настройте Windows Task Scheduler, как описано ниже. Web, worker и scheduler — отдельные процессы.
 
 ## Подключения и первый перенос
 
@@ -79,10 +92,10 @@ Copy-Item .env.example .env
 
 ```powershell
 .\.venv\Scripts\python.exe manage.py collectstatic --noinput
-.\.venv\Scripts\waitress-serve.exe --listen=127.0.0.1:8000 config.wsgi:application
+.\.venv\Scripts\waitress-serve.exe --listen=0.0.0.0:8001 config.wsgi:application
 ```
 
-Reverse proxy завершает HTTPS, передаёт Host, обслуживает `/static/` из `staticfiles/`, проксирует остальные пути на loopback Waitress. Не открывайте backend-порт наружу. `DJANGO_DEBUG=false`, уникальный secret key, корректный allowed host; secure cookies включены автоматически. Настройте HSTS/HTTPS redirect на reverse proxy. Не доверяйте произвольным заголовкам X-Forwarded-* из Интернета. Для нескольких серверов/worker нужна другая служебная БД и распределённая очередь: этот MVP рассчитан на один Windows Server.
+Reverse proxy завершает HTTPS, передаёт Host, обслуживает `/static/` из `staticfiles/`, проксирует остальные пути на `127.0.0.1:8001`. Waitress слушает `0.0.0.0:8001`; в production ограничьте доступ к backend-порту правилами firewall, разрешив его только reverse proxy. `DJANGO_DEBUG=false`, уникальный secret key, корректный allowed host; secure cookies включены автоматически. Настройте HSTS/HTTPS redirect на reverse proxy. Не доверяйте произвольным заголовкам X-Forwarded-* из Интернета. Для нескольких серверов/worker нужна другая служебная БД и распределённая очередь: этот MVP рассчитан на один Windows Server.
 
 JS/CSS поставляются локально в `static/vendor/`: Bootstrap 5.3.8 (MIT), HTMX 2.0.8 (BSD-2-Clause), Plotly 3.3.0 (MIT), CodeMirror 5.65.20 (MIT); лицензии сохранены в заголовках upstream. Внешние CDN не нужны при работе приложения.
 
@@ -119,7 +132,7 @@ python3 -m venv .venv
 export ODBCSYSINI=/workspace/.etl-odbc
 # Подготовьте .env по .env.example
 .venv/bin/python manage.py migrate
-.venv/bin/python manage.py runserver 127.0.0.1:8000
+.venv/bin/python manage.py runserver 0.0.0.0:8001
 # отдельный процесс
 .venv/bin/python manage.py etl_worker
 ```
